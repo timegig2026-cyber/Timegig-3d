@@ -27,13 +27,15 @@ export default function App() {
       className="min-h-screen bg-white text-neutral-900 flex flex-col justify-between selection:bg-neutral-100 selection:text-neutral-900 font-sans"
     >
       <div className="w-full max-w-md mx-auto flex flex-col min-h-screen relative shadow-xs border-x border-neutral-100/80">
-        {/* Sticky Minimalist Top Bar with Admin Launch */}
-        <Header
-          activeTab={activeTab}
-          onTabChange={setActiveTab}
-          onProfileReviewed={handleProfileReviewed}
-          onAdminToggle={setIsAdminOpen}
-        />
+        {/* Minimalist Top Bar (Shown for Profile tab; removed for Seekers & GiGs where search bar floats directly on map) */}
+        {activeTab === 'profile' && (
+          <Header
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
+            onProfileReviewed={handleProfileReviewed}
+            onAdminToggle={setIsAdminOpen}
+          />
+        )}
 
         {/* Dynamic Feature Views */}
         <main id="main-content-area" className="flex-1 flex flex-col">
@@ -54,9 +56,9 @@ export default function App() {
             {activeTab === 'gigs' && (
               <motion.div
                 key="gigs"
-                initial={{ opacity: 0, y: 4 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -4 }}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
                 transition={{ duration: 0.15 }}
                 className="flex-1 flex flex-col h-full"
               >

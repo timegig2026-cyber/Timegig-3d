@@ -1,5 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
-import L from 'leaflet';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import * as maplibregl from 'maplibre-gl';
+import 'maplibre-gl/dist/maplibre-gl.css';
 import {
   Globe,
   Locate,
@@ -8,21 +9,34 @@ import {
   AlertCircle,
   Building,
   Navigation,
+  Sparkles,
+  Plus,
+  Briefcase,
+  CheckCircle2,
+  Search,
+  X,
+  Loader2,
+  ChevronUp,
+  Compass,
+  Box,
 } from 'lucide-react';
-import { ProfileData } from '../types';
+import { ProfileData, MapGig, GeocodeLocation } from '../types';
+import { getStoredMapGigs, GIG_CATEGORIES_METADATA } from '../lib/gigStore';
+import { searchAddress } from '../lib/geocoding';
+import { CreateMapGigModal } from './gigs/CreateMapGigModal';
+import { GigDetailsModal } from './gigs/GigDetailsModal';
+import { NearbyGigsDrawer } from './gigs/NearbyGigsDrawer';
+import { AnimatePresence, motion } from 'motion/react';
 
 export const GigsView: React.FC = () => {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
-  const mapInstanceRef = useRef<L.Map | null>(null);
-  const userMarkerRef = useRef<L.Marker | null>(null);
-  const accuracyCircleRef = useRef<L.Circle | null>(null);
-  const searchMarkerRef = useRef<L.Marker | null>(null);
-
-  const baseLayerStandardRef = useRef<L.TileLayer | null>(null);
-  const baseLayerSatelliteRef = useRef<L.TileLayer | null>(null);
-  const satelliteLabelsRef = useRef<L.TileLayer | null>(null);
+  const mapInstanceRef = useRef<maplibregl.Map | null>(null);
+  const userMarkerRef = useRef<maplibregl.Marker | null>(null);
+  const accuracyCircleRef = useRef<maplibregl.Marker | null>(null); // MapLibre doesn't have a simple Circle class like Leaflet, we'll use a source/layer
+  const gigMarkersRef = useRef<maplibregl.Marker[]>([]);
 
   const [mapLayerType, setMapLayerType] = useState<'standard' | 'satellite'>('standard');
+  const [is3dMode, setIs3dMode] = useState<boolean>(false);
   const [userLocation, setUserLocation] = useState<{
     lat: number;
     lng: number;
@@ -37,7 +51,31 @@ export const GigsView: React.FC = () => {
     lng: number;
   } | null>(null);
 
-  // Load user profile picture if available
+  // Floating Search Bar State
+  const [isSearchBarHidden, setIsSearchBarHidden] = useState<boolean>(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<GeocodeLocation[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [isNearbyDrawerOpen, setIsNearbyDrawerOpen] = useState(false);
+  const searchContainerRef = useRef<HTMLDivElement | null>(null);
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Clicked location for creating a gig
+  const [pendingGigLocation, setPendingGigLocation] = useState<{
+    lat: number;
+    lng: number;
+  } | null>(null);
+
+  // Selected gig to view details and apply
+  const [selectedGig, setSelectedGig] = useState<MapGig | null>(null);
+
+  // Gigs list
+  const [gigs, setGigs] = useState<MapGig[]>([]);
+  const [actionToast, setActionToast] = useState<string | null>(null);
+
+  // Load user profile
   useEffect(() => {
     try {
       const saved = localStorage.getItem('app_user_profile');
@@ -49,202 +87,282 @@ export const GigsView: React.FC = () => {
     }
   }, []);
 
-  // Initialize Leaflet Map configured to show the entire world
-  useEffect(() => {
-    if (!mapContainerRef.current) return;
-    if (mapInstanceRef.current) return; // Prevent double init
-
-    const container = mapContainerRef.current;
-
-    // World view center & zoom
-    const worldCenterLat = 20;
-    const worldCenterLng = 0;
-    const worldZoom = 2;
-
-    const map = L.map(container, {
-      center: [worldCenterLat, worldCenterLng],
-      zoom: worldZoom,
-      minZoom: 1.5,
-      maxZoom: 19,
-      worldCopyJump: true,
-      zoomControl: false,
-      attributionControl: false,
-    });
-
-    // 1. Standard OpenStreetMap Layer
-    const standardLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      minZoom: 1.5,
-      attribution: '&copy; OpenStreetMap contributors',
-    });
-
-    // 2. High Resolution World Satellite Imagery Layer (ESRI World Imagery)
-    const satelliteLayer = L.tileLayer(
-      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-      {
-        maxZoom: 19,
-        minZoom: 1.5,
-        attribution: '&copy; Esri, Maxar, Earthstar Geographics',
-      }
-    );
-
-    // 3. Satellite Place & Street Labels Overlay
-    const labelsLayer = L.tileLayer(
-      'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
-      {
-        maxZoom: 19,
-        minZoom: 1.5,
-        opacity: 0.85,
-      }
-    );
-
-    baseLayerStandardRef.current = standardLayer;
-    baseLayerSatelliteRef.current = satelliteLayer;
-    satelliteLabelsRef.current = labelsLayer;
-
-    // Default to standard layer
-    standardLayer.addTo(map);
-
-    mapInstanceRef.current = map;
-
-    // Size invalidation triggers
-    const triggerInvalidate = () => {
-      if (mapInstanceRef.current) {
-        mapInstanceRef.current.invalidateSize();
-      }
-    };
-
-    triggerInvalidate();
-    const t1 = setTimeout(triggerInvalidate, 100);
-    const t2 = setTimeout(triggerInvalidate, 400);
-    const t3 = setTimeout(triggerInvalidate, 800);
-
-    const resizeObserver = new ResizeObserver(() => triggerInvalidate());
-    resizeObserver.observe(container);
-
-    window.addEventListener('resize', triggerInvalidate);
-
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-      clearTimeout(t3);
-      resizeObserver.disconnect();
-      window.removeEventListener('resize', triggerInvalidate);
-      map.remove();
-      mapInstanceRef.current = null;
-    };
+  // Fetch gigs
+  const loadGigs = useCallback(() => {
+    const list = getStoredMapGigs();
+    setGigs(list);
   }, []);
 
-  // Switch between Standard and Satellite views
   useEffect(() => {
-    if (!mapInstanceRef.current) return;
-    const map = mapInstanceRef.current;
+    loadGigs();
+    window.addEventListener('app-gigs-updated', loadGigs);
+    return () => window.removeEventListener('app-gigs-updated', loadGigs);
+  }, [loadGigs]);
 
-    if (mapLayerType === 'satellite') {
-      if (baseLayerStandardRef.current && map.hasLayer(baseLayerStandardRef.current)) {
-        map.removeLayer(baseLayerStandardRef.current);
-      }
-      if (baseLayerSatelliteRef.current) {
-        baseLayerSatelliteRef.current.addTo(map);
-      }
-      if (satelliteLabelsRef.current) {
-        satelliteLabelsRef.current.addTo(map);
-      }
-    } else {
-      if (baseLayerSatelliteRef.current && map.hasLayer(baseLayerSatelliteRef.current)) {
-        map.removeLayer(baseLayerSatelliteRef.current);
-      }
-      if (satelliteLabelsRef.current && map.hasLayer(satelliteLabelsRef.current)) {
-        map.removeLayer(satelliteLabelsRef.current);
-      }
-      if (baseLayerStandardRef.current) {
-        baseLayerStandardRef.current.addTo(map);
-      }
+  // Focus input when expanding floating search bar
+  useEffect(() => {
+    if (!isSearchBarHidden) {
+      setTimeout(() => {
+        searchInputRef.current?.focus();
+      }, 100);
     }
-  }, [mapLayerType]);
+  }, [isSearchBarHidden]);
 
-  // Listen for Top Bar Geocoded Location Search Navigation
+  // Close dropdown on outside click
   useEffect(() => {
-    const handleNavigate = (e: Event) => {
-      const customEvent = e as CustomEvent<{
-        lat: number;
-        lng: number;
-        displayName: string;
-        address?: Record<string, string>;
-      }>;
-      const { lat, lng, displayName, address } = customEvent.detail;
-      if (!mapInstanceRef.current || isNaN(lat) || isNaN(lng)) return;
-
-      const map = mapInstanceRef.current;
-      setActiveSearchResult({ displayName, lat, lng });
-
-      // Custom Red Pin for Searched Exact Address
-      const searchPinHtml = `
-        <div class="relative flex items-center justify-center -translate-x-1/2 -translate-y-1/2" style="width: 44px; height: 44px;">
-          <div class="absolute inset-0 rounded-full bg-rose-500/25 animate-ping"></div>
-          <div class="relative w-9 h-9 rounded-2xl bg-rose-600 text-white shadow-xl flex items-center justify-center border-2 border-white">
-            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-          </div>
-          <div class="absolute -bottom-1.5 w-2.5 h-2.5 bg-rose-700 rotate-45"></div>
-        </div>
-      `;
-
-      const searchIcon = L.divIcon({
-        className: 'custom-search-map-pin',
-        html: searchPinHtml,
-        iconSize: [44, 44],
-        iconAnchor: [22, 22],
-      });
-
-      // Place or update search marker
-      if (searchMarkerRef.current) {
-        searchMarkerRef.current.setLatLng([lat, lng]);
-        searchMarkerRef.current.setIcon(searchIcon);
-      } else {
-        searchMarkerRef.current = L.marker([lat, lng], {
-          icon: searchIcon,
-          zIndexOffset: 2000,
-        }).addTo(map);
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        searchContainerRef.current &&
+        !searchContainerRef.current.contains(e.target as Node)
+      ) {
+        setIsDropdownOpen(false);
       }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
-      const houseNumber = address?.house_number;
-      const road = address?.road;
-      const city = address?.city || address?.town || address?.village || address?.suburb;
-      const province = address?.state || address?.province;
-      const country = address?.country;
+  // Debounced live geocoding for floating search bar
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setSearchQuery(val);
 
-      searchMarkerRef.current.bindPopup(`
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+
+    if (!val || val.trim().length < 2) {
+      setSearchResults([]);
+      setIsSearching(false);
+      setIsDropdownOpen(false);
+      return;
+    }
+
+    setIsSearching(true);
+    setIsDropdownOpen(true);
+
+    searchTimeoutRef.current = setTimeout(async () => {
+      const results = await searchAddress(val);
+      setSearchResults(results);
+      setIsSearching(false);
+    }, 400);
+  };
+
+  const handleSelectLocation = (loc: GeocodeLocation) => {
+    setIsDropdownOpen(false);
+    setSearchQuery(loc.display_name.split(',')[0]);
+    navigateToCoordinates(parseFloat(loc.lat), parseFloat(loc.lon), loc.display_name, loc.address);
+  };
+
+  const handleSearchSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!searchQuery.trim()) return;
+
+    setIsSearching(true);
+    const results = await searchAddress(searchQuery);
+    setIsSearching(false);
+
+    if (results.length > 0) {
+      handleSelectLocation(results[0]);
+    } else {
+      setIsDropdownOpen(true);
+    }
+  };
+
+  const handleClearSearch = () => {
+    setSearchQuery('');
+    setSearchResults([]);
+    setIsDropdownOpen(false);
+  };
+
+  // Touch handlers to support pushing up floating search bar
+  const touchStartY = useRef(0);
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartY.current = e.touches[0].clientY;
+  };
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    const diff = touchStartY.current - e.changedTouches[0].clientY;
+    if (diff > 25) {
+      setIsSearchBarHidden(true);
+    }
+  };
+
+  // Navigate map to coordinates
+  const navigateToCoordinates = (
+    lat: number,
+    lng: number,
+    displayName: string,
+    address?: Record<string, string>
+  ) => {
+    if (!mapInstanceRef.current || isNaN(lat) || isNaN(lng)) return;
+
+    const map = mapInstanceRef.current;
+    setActiveSearchResult({ displayName, lat, lng });
+
+    const el = document.createElement('div');
+    el.className = 'custom-search-map-pin';
+    el.innerHTML = `
+      <div class="relative flex items-center justify-center -translate-x-1/2 -translate-y-1/2" style="width: 44px; height: 44px;">
+        <div class="absolute inset-0 rounded-full bg-rose-500/25 animate-ping"></div>
+        <div class="relative w-9 h-9 rounded-2xl bg-rose-600 text-white shadow-xl flex items-center justify-center border-2 border-white">
+          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+        </div>
+        <div class="absolute -bottom-1.5 w-2.5 h-2.5 bg-rose-700 rotate-45"></div>
+      </div>
+    `;
+
+    // Clear old search marker if any
+    const popup = new maplibregl.Popup({ offset: 25 })
+      .setHTML(`
         <div style="font-family: sans-serif; font-size: 12px; padding: 4px; max-width: 220px;">
           <div style="font-weight: 700; color: #0f172a; font-size: 13px; margin-bottom: 3px;">
-            ${[houseNumber, road].filter(Boolean).join(' ') || displayName.split(',')[0]}
+            ${address?.road || displayName.split(',')[0]}
           </div>
-          ${city || province ? `<div style="color: #475569; font-size: 11px; margin-bottom: 2px;">${[city, province].filter(Boolean).join(', ')}</div>` : ''}
-          ${country ? `<div style="color: #64748b; font-size: 10px;">${country}</div>` : ''}
-          <div style="margin-top: 6px; padding-top: 4px; border-top: 1px solid #e2e8f0; color: #0284c7; font-size: 10px; font-weight: 600;">
+          <div style="color: #64748b; font-size: 10px;">
             Exact Coordinates: ${lat.toFixed(5)}, ${lng.toFixed(5)}
           </div>
         </div>
       `);
 
-      // Fly map smoothly directly to exact location with street-level zoom
-      map.flyTo([lat, lng], 17, {
-        duration: 1.5,
-        easeLinearity: 0.25,
-      });
+    new maplibregl.Marker({ element: el })
+      .setLngLat([lng, lat])
+      .setPopup(popup)
+      .addTo(map);
 
-      setTimeout(() => {
-        if (searchMarkerRef.current) {
-          searchMarkerRef.current.openPopup();
-        }
-      }, 1600);
+    map.flyTo({
+      center: [lng, lat],
+      zoom: 17,
+      essential: true,
+      duration: 1500
+    });
+  };
+
+  // Initialize MapLibre GL
+  useEffect(() => {
+    const container = mapContainerRef.current;
+    if (!container || mapInstanceRef.current) return;
+
+    const map = new maplibregl.Map({
+      container: container,
+      style: 'https://demotiles.maplibre.org/style.json',
+      center: [24.8, -28.5],
+      zoom: 3,
+      pitch: 0,
+      bearing: 0,
+      antialias: true,
+    });
+
+    map.on('load', () => {
+      // Add Satellite layer
+      map.addSource('satellite', {
+        type: 'raster',
+        tiles: ['https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+        tileSize: 256
+      });
+      map.addLayer({
+        id: 'satellite-layer',
+        type: 'raster',
+        source: 'satellite',
+        layout: { visibility: 'none' }
+      });
+    });
+
+    map.on('click', (e) => {
+      setPendingGigLocation({
+        lat: e.lngLat.lat,
+        lng: e.lngLat.lng,
+      });
+    });
+
+    mapInstanceRef.current = map;
+
+    return () => {
+      map.remove();
+      mapInstanceRef.current = null;
+    };
+  }, []);
+
+  // Handle 3D Mode changes
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    if (is3dMode) {
+      map.easeTo({
+        pitch: 60,
+        bearing: -17,
+        duration: 1200,
+      });
+    } else {
+      map.easeTo({
+        pitch: 0,
+        bearing: 0,
+        duration: 1200,
+      });
+    }
+  }, [is3dMode]);
+
+  // Update Gig Markers
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    // Clear old
+    gigMarkersRef.current.forEach(m => m.remove());
+    gigMarkersRef.current = [];
+
+    gigs.forEach(gig => {
+      const meta = GIG_CATEGORIES_METADATA[gig.category] || GIG_CATEGORIES_METADATA.general;
+      const el = document.createElement('div');
+      el.className = 'custom-gig-pin';
+      el.innerHTML = `
+        <div class="group relative flex items-center justify-center -translate-x-1/2 -translate-y-1/2 cursor-pointer transition-transform hover:scale-110 active:scale-95" style="width: 52px; height: 52px;">
+          <div class="absolute inset-0 rounded-full bg-neutral-900/15 animate-ping"></div>
+          <div class="relative flex flex-col items-center">
+            <div class="px-2 py-0.5 bg-neutral-900 text-white rounded-full text-[9px] font-extrabold shadow-md mb-0.5 border border-white/40 whitespace-nowrap">
+              ${gig.pay}
+            </div>
+            <div class="w-9 h-9 rounded-2xl bg-white border-2 border-neutral-900 shadow-xl flex items-center justify-center text-base">
+              ${meta.icon}
+            </div>
+            <div class="w-2 h-2 bg-neutral-900 rotate-45 -mt-1 rounded-[1px]"></div>
+          </div>
+        </div>
+      `;
+
+      el.onclick = (e) => {
+        e.stopPropagation();
+        setSelectedGig(gig);
+      };
+
+      const marker = new maplibregl.Marker({ element: el })
+        .setLngLat([gig.lng, gig.lat])
+        .addTo(map);
+      
+      gigMarkersRef.current.push(marker);
+    });
+  }, [gigs]);
+
+  // Update Visibility
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    const updateVisibility = () => {
+      if (map.getLayer('satellite-layer')) {
+        map.setLayoutProperty('satellite-layer', 'visibility', mapLayerType === 'satellite' ? 'visible' : 'none');
+      }
     };
 
-    window.addEventListener('map-navigate-to-location', handleNavigate);
-    return () => window.removeEventListener('map-navigate-to-location', handleNavigate);
-  }, []);
+    if (map.isStyleLoaded()) {
+      updateVisibility();
+    } else {
+      map.on('idle', updateVisibility);
+    }
+  }, [mapLayerType]);
 
   // Request & Watch Geolocation
   useEffect(() => {
@@ -267,13 +385,12 @@ export const GigsView: React.FC = () => {
         const map = mapInstanceRef.current;
 
         const avatarUrl = userProfile?.profilePicture;
-        const iconHtml = `
+        const el = document.createElement('div');
+        el.className = 'custom-user-map-pin';
+        el.innerHTML = `
           <div class="relative flex items-center justify-center -translate-x-1/2 -translate-y-1/2" style="width: 48px; height: 48px;">
-            <!-- Outer Pulsing Radar Wave -->
             <div class="absolute inset-0 rounded-full bg-sky-500/25 animate-ping"></div>
-            <!-- Middle Glowing Halo -->
             <div class="absolute w-9 h-9 rounded-full bg-sky-500/35 backdrop-blur-xs"></div>
-            <!-- Center Avatar Marker -->
             <div class="relative w-8 h-8 rounded-full bg-white border-2 border-sky-500 shadow-md flex items-center justify-center overflow-hidden">
               ${
                 avatarUrl
@@ -281,49 +398,16 @@ export const GigsView: React.FC = () => {
                   : `<div class="w-full h-full bg-neutral-900 text-white flex items-center justify-center font-bold text-[11px]">You</div>`
               }
             </div>
-            <!-- Bottom Pointer Pin -->
             <div class="absolute -bottom-1 w-2 h-2 bg-sky-600 rotate-45 rounded-[1px]"></div>
           </div>
         `;
 
-        const customIcon = L.divIcon({
-          className: 'custom-user-map-pin',
-          html: iconHtml,
-          iconSize: [48, 48],
-          iconAnchor: [24, 24],
-        });
-
-        // Update or Create Marker
         if (userMarkerRef.current) {
-          userMarkerRef.current.setLatLng([latitude, longitude]);
-          userMarkerRef.current.setIcon(customIcon);
+          userMarkerRef.current.setLngLat([longitude, latitude]);
         } else {
-          userMarkerRef.current = L.marker([latitude, longitude], {
-            icon: customIcon,
-            zIndexOffset: 1000,
-          }).addTo(map);
-
-          userMarkerRef.current.bindPopup(`
-            <div style="font-family: sans-serif; font-size: 12px; padding: 2px;">
-              <strong style="color: #0f172a; display: block; font-size: 13px; margin-bottom: 2px;">Your Exact Location</strong>
-              <span style="color: #64748b; font-size: 11px;">Lat: ${latitude.toFixed(4)}, Lon: ${longitude.toFixed(4)}</span>
-              ${accuracy ? `<br/><span style="color: #0284c7; font-size: 10px; font-weight: 600;">Accuracy: ~${Math.round(accuracy)}m</span>` : ''}
-            </div>
-          `);
-        }
-
-        // Accuracy Circle
-        if (accuracyCircleRef.current) {
-          accuracyCircleRef.current.setLatLng([latitude, longitude]);
-          accuracyCircleRef.current.setRadius(accuracy || 30);
-        } else {
-          accuracyCircleRef.current = L.circle([latitude, longitude], {
-            radius: accuracy || 30,
-            color: '#0284c7',
-            weight: 1,
-            fillColor: '#38bdf8',
-            fillOpacity: 0.12,
-          }).addTo(map);
+          userMarkerRef.current = new maplibregl.Marker({ element: el })
+            .setLngLat([longitude, latitude])
+            .addTo(map);
         }
       }
     };
@@ -362,26 +446,36 @@ export const GigsView: React.FC = () => {
   // Center on entire World
   const handleShowWorld = () => {
     if (!mapInstanceRef.current) return;
-    mapInstanceRef.current.flyTo([20, 0], 2, { duration: 1.2 });
+    mapInstanceRef.current.flyTo({
+      center: [24, -28],
+      zoom: 3,
+      essential: true,
+      duration: 1200
+    });
   };
 
   // Center on user's exact location
   const handleCenterOnUser = () => {
     if (!mapInstanceRef.current) return;
     if (userLocation) {
-      mapInstanceRef.current.flyTo([userLocation.lat, userLocation.lng], 16, {
-        duration: 1.2,
+      mapInstanceRef.current.flyTo({
+        center: [userLocation.lng, userLocation.lat],
+        zoom: 16,
+        essential: true,
+        duration: 1200
       });
-      if (userMarkerRef.current) {
-        userMarkerRef.current.openPopup();
-      }
     } else {
       setIsLocating(true);
       navigator.geolocation.getCurrentPosition(
         (pos) => {
           const { latitude, longitude, accuracy } = pos.coords;
           setUserLocation({ lat: latitude, lng: longitude, accuracy });
-          mapInstanceRef.current?.flyTo([latitude, longitude], 16, { duration: 1.2 });
+          mapInstanceRef.current?.flyTo({
+            center: [longitude, latitude],
+            zoom: 16,
+            essential: true,
+            duration: 1200
+          });
           setIsLocating(false);
         },
         (err) => {
@@ -401,23 +495,243 @@ export const GigsView: React.FC = () => {
     mapInstanceRef.current?.zoomOut();
   };
 
+  const handleGigCreated = (newGig: MapGig) => {
+    loadGigs();
+    setActionToast(`GiG "${newGig.title}" pinned on map!`);
+    setTimeout(() => setActionToast(null), 4000);
+
+    // Fly smoothly to new gig
+    if (mapInstanceRef.current) {
+      mapInstanceRef.current.flyTo({
+        center: [newGig.lng, newGig.lat],
+        zoom: 16,
+        essential: true,
+        duration: 1200
+      });
+    }
+  };
+
   return (
     <div
       id="gigs-view"
-      className="relative w-full h-[calc(100vh-8rem)] min-h-[500px] flex flex-col bg-neutral-100 overflow-hidden"
+      className="relative w-full h-[calc(100vh-4rem)] flex flex-col bg-neutral-100 overflow-hidden"
       aria-label="GiGs OpenStreetMap and Satellite View"
     >
-      {/* Full-screen Leaflet Map Canvas */}
+      {/* Full-screen Leaflet Map Canvas (Extends to top of screen without top bar) */}
       <div
         ref={mapContainerRef}
         id="openstreetmap-canvas"
-        className="w-full h-full min-h-full flex-1 z-0 bg-neutral-200"
+        className="w-full h-full min-h-full flex-1 z-0 bg-neutral-200 cursor-crosshair"
         style={{ minHeight: '100%', height: '100%', width: '100%' }}
       />
 
+      {/* Floating Search Bar on Top of Map */}
+      <div className="absolute top-4 left-4 right-4 z-30 pointer-events-auto">
+        {isSearchBarHidden ? (
+          /* Small Floating Search Icon & Nearby Button when hidden */
+          <div className="flex items-center gap-2">
+            <motion.button
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.8, opacity: 0 }}
+              id="btn-floating-search-icon"
+              type="button"
+              onClick={() => setIsSearchBarHidden(false)}
+              title="Search home no., street, city, province..."
+              className="w-11 h-11 bg-white/95 backdrop-blur-md border border-neutral-200/90 rounded-2xl shadow-lg flex items-center justify-center text-neutral-800 hover:text-sky-600 hover:bg-white cursor-pointer active:scale-95 transition-all"
+            >
+              <Search className="w-5 h-5 text-neutral-700 hover:text-sky-600" />
+            </motion.button>
+
+            <motion.button
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.8, opacity: 0 }}
+              id="btn-floating-nearby-icon"
+              type="button"
+              onClick={() => setIsNearbyDrawerOpen(true)}
+              title="View all nearby GiGs"
+              className="px-3.5 h-11 bg-neutral-900 text-white border border-neutral-800 rounded-2xl shadow-lg flex items-center gap-2 hover:bg-neutral-800 cursor-pointer active:scale-95 transition-all"
+            >
+              <Compass className="w-4 h-4 text-amber-400" />
+              <span className="text-xs font-bold">Nearby</span>
+              <span className="px-1.5 py-0.2 bg-amber-400 text-neutral-900 rounded-full text-[10px] font-extrabold">
+                {gigs.length}
+              </span>
+            </motion.button>
+          </div>
+        ) : (
+          /* Full Floating Search Bar */
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            ref={searchContainerRef}
+            onTouchStart={handleTouchStart}
+            onTouchEnd={handleTouchEnd}
+            className="relative w-full flex items-center gap-2"
+          >
+            <form onSubmit={handleSearchSubmit} className="flex-1 relative flex items-center">
+              <div className="relative w-full flex items-center bg-white/95 backdrop-blur-md focus-within:bg-white focus-within:ring-2 focus-within:ring-neutral-900 border border-neutral-200/90 rounded-2xl transition-all shadow-lg">
+                <Search className="w-4 h-4 text-neutral-400 ml-3.5 shrink-0" />
+                <input
+                  ref={searchInputRef}
+                  id="floating-location-search"
+                  type="text"
+                  value={searchQuery}
+                  onChange={handleSearchChange}
+                  onFocus={() => {
+                    if (searchResults.length > 0 || searchQuery.length >= 2) {
+                      setIsDropdownOpen(true);
+                    }
+                  }}
+                  placeholder="Search home no., street, location, province..."
+                  className="w-full bg-transparent text-xs py-3 px-2.5 text-neutral-900 placeholder:text-neutral-400 focus:outline-none font-medium"
+                  autoComplete="off"
+                />
+
+                {isSearching ? (
+                  <Loader2 className="w-4 h-4 text-neutral-400 mr-3 animate-spin shrink-0" />
+                ) : searchQuery ? (
+                  <button
+                    type="button"
+                    onClick={handleClearSearch}
+                    className="p-1.5 mr-1 text-neutral-400 hover:text-neutral-700 cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                ) : null}
+
+                {/* Push-Up Button to hide into small search icon */}
+                <button
+                  id="btn-push-up-search-bar"
+                  type="button"
+                  onClick={() => setIsSearchBarHidden(true)}
+                  title="Push up to collapse into small search icon"
+                  className="p-2 mr-2 text-neutral-400 hover:text-neutral-900 hover:bg-neutral-100 rounded-xl transition-colors cursor-pointer shrink-0"
+                >
+                  <ChevronUp className="w-4 h-4" />
+                </button>
+              </div>
+            </form>
+
+            {/* Nearby GiGs Icon Button */}
+            <button
+              id="btn-nearby-gigs-top-bar"
+              type="button"
+              onClick={() => setIsNearbyDrawerOpen(true)}
+              title="View all nearby GiGs"
+              className="h-11 px-3.5 bg-neutral-900 hover:bg-neutral-800 text-white rounded-2xl shadow-lg border border-neutral-800 flex items-center gap-1.5 cursor-pointer shrink-0 active:scale-95 transition-all"
+            >
+              <Compass className="w-4 h-4 text-amber-400" />
+              <span className="text-xs font-bold hidden sm:inline">Nearby</span>
+              <span className="px-1.5 py-0.2 bg-amber-400 text-neutral-900 rounded-full text-[10px] font-extrabold">
+                {gigs.length}
+              </span>
+            </button>
+
+            {/* Autocomplete Dropdown List */}
+            <AnimatePresence>
+              {isDropdownOpen && (
+                <motion.div
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  className="absolute top-full left-0 right-0 mt-2 bg-white/95 backdrop-blur-md rounded-2xl border border-neutral-200 shadow-2xl z-50 overflow-hidden max-h-72 overflow-y-auto"
+                >
+                  {isSearching && searchResults.length === 0 ? (
+                    <div className="p-4 text-center text-xs text-neutral-500 flex items-center justify-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin text-neutral-400" />
+                      <span>Searching global locations...</span>
+                    </div>
+                  ) : searchResults.length > 0 ? (
+                    <div className="py-1">
+                      <div className="px-3 py-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider">
+                        Suggested Locations & Addresses
+                      </div>
+                      {searchResults.map((loc) => {
+                        const address = loc.address;
+                        const house = address?.house_number;
+                        const road = address?.road;
+                        const city =
+                          address?.city || address?.town || address?.village || address?.suburb;
+                        const province = address?.state || address?.province;
+                        const country = address?.country;
+
+                        const primaryText =
+                          [house, road].filter(Boolean).join(' ') ||
+                          loc.display_name.split(',')[0];
+                        const secondaryText =
+                          [city, province, country].filter(Boolean).join(', ') ||
+                          loc.display_name;
+
+                        return (
+                          <button
+                            key={loc.place_id}
+                            type="button"
+                            onClick={() => handleSelectLocation(loc)}
+                            className="w-full px-3.5 py-2.5 text-left hover:bg-neutral-50 flex items-start gap-2.5 transition-colors cursor-pointer border-b border-neutral-50 last:border-0"
+                          >
+                            <div className="w-7 h-7 rounded-lg bg-sky-50 text-sky-600 flex items-center justify-center shrink-0 mt-0.5">
+                              {house ? (
+                                <Building className="w-3.5 h-3.5" />
+                              ) : (
+                                <MapPin className="w-3.5 h-3.5" />
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-semibold text-neutral-900 truncate">
+                                {primaryText}
+                              </p>
+                              <p className="text-[11px] text-neutral-500 truncate">
+                                {secondaryText}
+                              </p>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : searchQuery.length >= 2 ? (
+                    <div className="p-4 text-center text-xs text-neutral-500">
+                      <p className="font-semibold text-neutral-700">No exact location found</p>
+                      <p className="text-[11px] text-neutral-400 mt-0.5">
+                        Try searching by street name, city, or province name
+                      </p>
+                    </div>
+                  ) : null}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </motion.div>
+        )}
+      </div>
+
+      {/* Floating Interactive Toast */}
+      <AnimatePresence>
+        {actionToast && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="absolute top-20 left-4 right-4 z-30 bg-emerald-950 text-white rounded-2xl p-3 shadow-xl flex items-center justify-between border border-emerald-800"
+          >
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span className="text-xs font-semibold truncate">{actionToast}</span>
+            </div>
+            <button
+              onClick={() => setActionToast(null)}
+              className="text-neutral-400 hover:text-white text-xs font-bold px-1"
+            >
+              ✕
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Floating Active Search Result Banner */}
       {activeSearchResult && (
-        <div className="absolute top-3 left-3 right-3 z-20 bg-white/95 backdrop-blur-md border border-neutral-200/90 rounded-2xl p-2.5 px-3.5 shadow-md flex items-center justify-between gap-2">
+        <div className="absolute top-20 left-4 right-4 z-20 bg-white/95 backdrop-blur-md border border-neutral-200/90 rounded-2xl p-2.5 px-3.5 shadow-md flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
             <div className="w-6 h-6 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center shrink-0">
               <MapPin className="w-3.5 h-3.5" />
@@ -443,7 +757,7 @@ export const GigsView: React.FC = () => {
 
       {/* Location Error Warning Toast */}
       {locationError && (
-        <div className="absolute top-3 left-3 right-3 z-20 bg-amber-50/95 backdrop-blur-md border border-amber-200 rounded-xl p-2.5 text-xs text-amber-900 shadow-sm flex items-start gap-2">
+        <div className="absolute top-20 left-4 right-4 z-20 bg-amber-50/95 backdrop-blur-md border border-amber-200 rounded-xl p-2.5 text-xs text-amber-900 shadow-sm flex items-start gap-2">
           <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
           <p className="flex-1 text-[11px] leading-tight">{locationError}</p>
           <button
@@ -455,8 +769,52 @@ export const GigsView: React.FC = () => {
         </div>
       )}
 
+      {/* Map Hint Pill at Bottom Left */}
+      <div className="absolute bottom-3 left-3 z-20 flex flex-col gap-1.5 pointer-events-auto">
+        <div className="bg-neutral-900/90 backdrop-blur-md text-white rounded-2xl px-3 py-1.5 text-[11px] font-semibold shadow-lg flex items-center gap-1.5 border border-neutral-700">
+          <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+          <span>Click anywhere to create a GiG</span>
+        </div>
+
+        <div className="bg-white/90 backdrop-blur-xs border border-neutral-200/80 rounded-xl px-2.5 py-1 text-[10px] font-semibold text-neutral-700 shadow-2xs flex items-center gap-1.5 w-fit">
+          <span
+            className={`w-2 h-2 rounded-full ${
+              mapLayerType === 'satellite' ? 'bg-amber-500 animate-pulse' : 'bg-sky-500'
+            }`}
+          />
+          <span className="capitalize">{mapLayerType} View</span>
+          <span className="text-neutral-400">· {gigs.length} GiGs active</span>
+        </div>
+      </div>
+
       {/* Floating Map Controls (Right Side) */}
-      <div className="absolute right-3 bottom-20 z-20 flex flex-col gap-2">
+      <div className="absolute right-3 bottom-16 z-20 flex flex-col gap-2">
+        {/* Nearby GiGs Icon Control Button */}
+        <button
+          id="btn-nearby-gigs-floating-ctrl"
+          type="button"
+          onClick={() => setIsNearbyDrawerOpen(true)}
+          title="See All Nearby GiGs"
+          className="w-11 h-11 bg-neutral-900 hover:bg-neutral-800 text-amber-400 border border-neutral-700 rounded-2xl shadow-lg flex items-center justify-center transition-all cursor-pointer group active:scale-95"
+        >
+          <Compass className="w-5 h-5 transition-transform group-hover:scale-110" />
+        </button>
+
+        {/* Toggle 3D View Mode */}
+        <button
+          id="btn-toggle-3d-view"
+          type="button"
+          onClick={() => setIs3dMode((prev) => !prev)}
+          title={is3dMode ? 'Switch to 2D Top View' : 'Switch to 3D Perspective View'}
+          className={`w-11 h-11 backdrop-blur-md border rounded-2xl shadow-md flex items-center justify-center transition-all cursor-pointer group active:scale-95 ${
+            is3dMode
+              ? 'bg-neutral-900 border-neutral-700 text-sky-400'
+              : 'bg-white/95 border-neutral-200/90 text-neutral-800 hover:text-sky-600 hover:bg-white'
+          }`}
+        >
+          <Box className={`w-5 h-5 transition-transform group-hover:scale-110 ${is3dMode ? 'animate-pulse' : ''}`} />
+        </button>
+
         {/* Toggle Satellite View vs Standard Map */}
         <button
           id="btn-toggle-satellite-view"
@@ -527,17 +885,51 @@ export const GigsView: React.FC = () => {
         </div>
       </div>
 
-      {/* Layer Mode Pill Indicator (Bottom Left) */}
-      <div className="absolute bottom-2 left-3 z-10 flex items-center gap-2 pointer-events-auto">
-        <div className="bg-white/90 backdrop-blur-xs border border-neutral-200/80 rounded-xl px-2.5 py-1 text-[10px] font-semibold text-neutral-700 shadow-2xs flex items-center gap-1.5">
-          <span
-            className={`w-2 h-2 rounded-full ${
-              mapLayerType === 'satellite' ? 'bg-amber-500 animate-pulse' : 'bg-sky-500'
-            }`}
+      {/* Create GiG at Clicked Location Modal */}
+      <AnimatePresence>
+        {pendingGigLocation && (
+          <CreateMapGigModal
+            lat={pendingGigLocation.lat}
+            lng={pendingGigLocation.lng}
+            onClose={() => setPendingGigLocation(null)}
+            onGigCreated={handleGigCreated}
           />
-          <span className="capitalize">{mapLayerType} View</span>
-        </div>
-      </div>
+        )}
+      </AnimatePresence>
+
+      {/* Gig Details & Apply Modal */}
+      <AnimatePresence>
+        {selectedGig && (
+          <GigDetailsModal
+            gig={selectedGig}
+            onClose={() => setSelectedGig(null)}
+            onApplied={() => {
+              loadGigs();
+              setActionToast(`Application sent to ${selectedGig.posterName}!`);
+              setTimeout(() => setActionToast(null), 4000);
+            }}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Nearby GiGs Drawer */}
+      <AnimatePresence>
+        {isNearbyDrawerOpen && (
+          <NearbyGigsDrawer
+            gigs={gigs}
+            userLocation={userLocation}
+            onClose={() => setIsNearbyDrawerOpen(false)}
+            onSelectGig={(gig) => {
+              setIsNearbyDrawerOpen(false);
+              navigateToCoordinates(gig.lat, gig.lng, gig.title);
+              setSelectedGig(gig);
+            }}
+            onCreateGigPrompt={() => {
+              setPendingGigLocation(userLocation || { lat: 20, lng: 0 });
+            }}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 };

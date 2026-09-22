@@ -1,10 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { SubmissionRecord, AdminFeatureTab } from '../../types';
+import { SubmissionRecord, AdminFeatureTab, TenantActivation } from '../../types';
 import {
   getStoredSubmissions,
   approveSubmission,
   rejectSubmission,
 } from '../../lib/submissionStore';
+import {
+  getTenantActivations,
+  approveTenantActivation,
+  rejectTenantActivation,
+} from '../../lib/tenantStore';
 import { ProfileReviewDetailModal } from './ProfileReviewDetailModal';
 import {
   FileCheck2,
@@ -19,6 +24,11 @@ import {
   ArrowLeft,
   Eye,
   Check,
+  User,
+  AlertTriangle,
+  Mail,
+  Phone,
+  MapPin,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -33,8 +43,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 }) => {
   const [activeAdminTab, setActiveAdminTab] = useState<AdminFeatureTab>('submissions');
   const [submissions, setSubmissions] = useState<SubmissionRecord[]>([]);
+  const [tenantActivations, setTenantActivations] = useState<TenantActivation[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'in_review' | 'approved' | 'rejected'>('all');
+  const [tenantStatusFilter, setTenantStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
   const [selectedSubmission, setSelectedSubmission] = useState<SubmissionRecord | null>(null);
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -43,11 +55,24 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     setSubmissions([...list]);
   };
 
+  const loadTenantActivations = () => {
+    const list = getTenantActivations();
+    setTenantActivations([...list]);
+  };
+
   useEffect(() => {
     loadSubmissions();
-    const handleStorageChange = () => loadSubmissions();
+    loadTenantActivations();
+    const handleStorageChange = () => {
+      loadSubmissions();
+      loadTenantActivations();
+    };
     window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
+    window.addEventListener('app-tenant-updated', handleStorageChange);
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('app-tenant-updated', handleStorageChange);
+    };
   }, []);
 
   const showToast = (type: 'success' | 'error', text: string) => {
@@ -75,9 +100,27 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     }
   };
 
+  const handleApproveTenant = (id: string) => {
+    const res = approveTenantActivation(id);
+    if (res) {
+      loadTenantActivations();
+      showToast('success', `Approved Tenant activation for ${res.fullName}`);
+    }
+  };
+
+  const handleRejectTenant = (id: string, reason?: string) => {
+    const res = rejectTenantActivation(id, reason);
+    if (res) {
+      loadTenantActivations();
+      showToast('error', `Rejected Tenant activation for ${res.fullName}`);
+    }
+  };
+
   const pendingCount = submissions.filter((s) => s.status === 'in_review').length;
   const approvedCount = submissions.filter((s) => s.status === 'approved').length;
   const rejectedCount = submissions.filter((s) => s.status === 'rejected').length;
+
+  const pendingTenantCount = tenantActivations.filter((t) => t.status === 'pending').length;
 
   const filteredSubmissions = submissions.filter((s) => {
     const matchesSearch =
@@ -87,6 +130,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
     const matchesStatus = statusFilter === 'all' || s.status === statusFilter;
     return matchesSearch && matchesStatus;
+  });
+
+  const filteredTenantActivations = tenantActivations.filter((t) => {
+    if (tenantStatusFilter === 'all') return true;
+    return t.status === tenantStatusFilter;
   });
 
   return (
@@ -190,6 +238,17 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               }`}
             />
             <span>Tenant</span>
+            {pendingTenantCount > 0 && (
+              <span
+                className={`ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                  activeAdminTab === 'tenant'
+                    ? 'bg-teal-400 text-neutral-900'
+                    : 'bg-teal-100 text-teal-800'
+                }`}
+              >
+                {pendingTenantCount}
+              </span>
+            )}
           </button>
 
           {/* Feature 5: System */}
@@ -517,17 +576,195 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             />
           )}
 
-          {/* Feature 4: Tenant (Dedicated White Canvas) */}
+          {/* Feature 4: Tenant Activation Review */}
           {activeAdminTab === 'tenant' && (
             <motion.div
-              key="admin-empty-tenant"
-              id="admin-feature-empty-tenant"
+              key="admin-tenant-activations"
+              id="admin-feature-tenant-activations"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.15 }}
-              className="flex-1 w-full bg-white"
-            />
+              className="p-4 sm:p-6 max-w-5xl mx-auto w-full space-y-4"
+            >
+              {/* Filter Tabs Header */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-neutral-100">
+                <div>
+                  <h2 className="text-base font-bold text-neutral-900 flex items-center gap-2">
+                    <Building2 className="w-5 h-5 text-teal-600" />
+                    <span>Tenant Feature Activation Requests</span>
+                  </h2>
+                  <p className="text-xs text-neutral-500 mt-0.5">
+                    Review and approve user requests to activate the Tenant feature.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+                  {(['all', 'pending', 'approved', 'rejected'] as const).map((filter) => {
+                    const count =
+                      filter === 'all'
+                        ? tenantActivations.length
+                        : tenantActivations.filter((t) => t.status === filter).length;
+                    return (
+                      <button
+                        key={filter}
+                        type="button"
+                        onClick={() => setTenantStatusFilter(filter)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-semibold capitalize whitespace-nowrap transition-colors cursor-pointer ${
+                          tenantStatusFilter === filter
+                            ? 'bg-neutral-900 text-white'
+                            : 'bg-neutral-100 hover:bg-neutral-200 text-neutral-600'
+                        }`}
+                      >
+                        {filter} ({count})
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Activation Requests List */}
+              {filteredTenantActivations.length === 0 ? (
+                <div className="p-12 text-center bg-neutral-50 rounded-3xl border border-neutral-200/80 mt-4">
+                  <Building2 className="w-12 h-12 text-neutral-300 mx-auto mb-3" />
+                  <h3 className="text-sm font-bold text-neutral-700">No Tenant Activation Requests</h3>
+                  <p className="text-xs text-neutral-400 mt-1 max-w-xs mx-auto">
+                    When verified users request to activate the Tenant feature, their application with attached profile picture logo will appear here.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 pt-2">
+                  {filteredTenantActivations.map((item) => {
+                    const isPending = item.status === 'pending';
+                    const isApproved = item.status === 'approved';
+                    const isRejected = item.status === 'rejected';
+
+                    return (
+                      <div
+                        key={item.id}
+                        id={`tenant-activation-card-${item.id}`}
+                        className="p-4 bg-white rounded-2xl border border-neutral-200/80 shadow-xs flex flex-col justify-between gap-3 hover:border-neutral-300 transition-all"
+                      >
+                        <div className="flex items-start gap-3">
+                          {/* Attached Profile Picture Logo */}
+                          <div className="relative shrink-0">
+                            <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-neutral-200 bg-neutral-100 flex items-center justify-center shadow-xs">
+                              {item.profilePicture ? (
+                                <img
+                                  src={item.profilePicture}
+                                  alt={item.fullName}
+                                  referrerPolicy="no-referrer"
+                                  className="w-full h-full object-cover"
+                                />
+                              ) : (
+                                <User className="w-6 h-6 text-neutral-400" />
+                              )}
+                            </div>
+                            {isApproved && (
+                              <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-emerald-500 rounded-full border border-white flex items-center justify-center text-white">
+                                <Check className="w-2.5 h-2.5" />
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Info */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-1">
+                              <h3 className="text-xs font-bold text-neutral-900 truncate">
+                                {item.fullName}
+                              </h3>
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-[10px] font-bold capitalize shrink-0 ${
+                                  isPending
+                                    ? 'bg-amber-100 text-amber-800'
+                                    : isApproved
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : 'bg-red-100 text-red-800'
+                                }`}
+                              >
+                                {item.status}
+                              </span>
+                            </div>
+
+                            <p className="text-[11px] text-neutral-500 font-medium">
+                              {item.occupation} {item.location ? `· ${item.location}` : ''}
+                            </p>
+
+                            <div className="mt-1.5 space-y-0.5 text-[11px] text-neutral-600">
+                              {item.email && (
+                                <div className="flex items-center gap-1.5 truncate">
+                                  <Mail className="w-3 h-3 text-neutral-400 shrink-0" />
+                                  <span className="truncate">{item.email}</span>
+                                </div>
+                              )}
+                              {item.phone && (
+                                <div className="flex items-center gap-1.5">
+                                  <Phone className="w-3 h-3 text-neutral-400 shrink-0" />
+                                  <span>{item.phone}</span>
+                                </div>
+                              )}
+                            </div>
+
+                            {item.rejectionReason && (
+                              <p className="mt-2 text-[11px] text-red-700 bg-red-50 p-2 rounded-xl border border-red-100">
+                                Reason: {item.rejectionReason}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Action Buttons */}
+                        <div className="flex items-center justify-between pt-2 border-t border-neutral-100">
+                          <span className="text-[10px] text-neutral-400">
+                            {new Date(item.requestedAt).toLocaleDateString()}
+                          </span>
+
+                          <div className="flex items-center gap-1.5">
+                            {isPending ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRejectTenant(item.id)}
+                                  className="px-2.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1 cursor-pointer border border-red-200"
+                                >
+                                  <XCircle className="w-3.5 h-3.5" />
+                                  <span>Reject</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleApproveTenant(item.id)}
+                                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold transition-colors flex items-center gap-1 cursor-pointer shadow-xs"
+                                >
+                                  <Check className="w-3.5 h-3.5" />
+                                  <span>Approve</span>
+                                </button>
+                              </>
+                            ) : isApproved ? (
+                              <button
+                                type="button"
+                                onClick={() => handleRejectTenant(item.id, 'Revoked by admin')}
+                                className="px-2.5 py-1 text-neutral-400 hover:text-red-600 text-[11px] font-medium transition-colors cursor-pointer"
+                              >
+                                Revoke Access
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleApproveTenant(item.id)}
+                                className="px-2.5 py-1.5 bg-neutral-900 hover:bg-neutral-800 text-white rounded-xl text-xs font-semibold transition-colors flex items-center gap-1 cursor-pointer"
+                              >
+                                <Check className="w-3.5 h-3.5" />
+                                <span>Re-approve</span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </motion.div>
           )}
 
           {/* Feature 5: System (Clean White Canvas) */}
