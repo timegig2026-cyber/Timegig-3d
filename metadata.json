@@ -1,0 +1,6 @@
+{
+  "name": "Seekers & GiGs",
+  "description": "An empty white template featuring Seekers, GiGs, and Profile bottom navigation.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
