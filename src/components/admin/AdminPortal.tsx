@@ -9,6 +9,8 @@ import {
   getTenantActivations,
   approveTenantActivation,
   rejectTenantActivation,
+  verifyTenantProofOfPayment,
+  rejectTenantProofOfPayment,
 } from '../../lib/tenantStore';
 import { ProfileReviewDetailModal } from './ProfileReviewDetailModal';
 import {
@@ -29,6 +31,12 @@ import {
   Mail,
   Phone,
   MapPin,
+  CreditCard,
+  Receipt,
+  Download,
+  ExternalLink,
+  DollarSign,
+  Building,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -121,6 +129,27 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const rejectedCount = submissions.filter((s) => s.status === 'rejected').length;
 
   const pendingTenantCount = tenantActivations.filter((t) => t.status === 'pending').length;
+  const pendingPopCount = tenantActivations.filter(
+    (t) => t.subscriptionVerificationStatus === 'in_review' || (t.proofOfPaymentFileName && t.subscriptionVerificationStatus !== 'verified')
+  ).length;
+
+  const [popPreviewModal, setPopPreviewModal] = useState<TenantActivation | null>(null);
+
+  const handleVerifyPoP = (id: string) => {
+    const res = verifyTenantProofOfPayment(id);
+    if (res) {
+      loadTenantActivations();
+      showToast('success', `Verified Capitec R299,99 subscription payment for ${res.fullName}`);
+    }
+  };
+
+  const handleRejectPoP = (id: string) => {
+    const res = rejectTenantProofOfPayment(id, 'Proof of payment document unverified or incorrect reference');
+    if (res) {
+      loadTenantActivations();
+      showToast('error', `Rejected proof of payment for ${res.fullName}`);
+    }
+  };
 
   const filteredSubmissions = submissions.filter((s) => {
     const matchesSearch =
@@ -247,6 +276,36 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 }`}
               >
                 {pendingTenantCount}
+              </span>
+            )}
+          </button>
+
+          {/* Feature: PoP (Proof of Payment) */}
+          <button
+            id="admin-top-tab-pop"
+            type="button"
+            onClick={() => setActiveAdminTab('pop')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all duration-150 cursor-pointer ${
+              activeAdminTab === 'pop'
+                ? 'bg-neutral-900 text-white shadow-xs'
+                : 'text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100'
+            }`}
+          >
+            <CreditCard
+              className={`w-4 h-4 ${
+                activeAdminTab === 'pop' ? 'text-amber-400' : 'text-neutral-500'
+              }`}
+            />
+            <span>PoP</span>
+            {pendingPopCount > 0 && (
+              <span
+                className={`ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                  activeAdminTab === 'pop'
+                    ? 'bg-amber-400 text-neutral-900'
+                    : 'bg-amber-100 text-amber-800'
+                }`}
+              >
+                {pendingPopCount}
               </span>
             )}
           </button>
@@ -767,6 +826,198 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             </motion.div>
           )}
 
+          {/* Feature: PoP (Proof of Payment Receipts Management) */}
+          {activeAdminTab === 'pop' && (
+            <motion.div
+              key="admin-pop-feature"
+              id="admin-feature-pop"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.15 }}
+              className="p-4 sm:p-6 space-y-6"
+            >
+              {/* Header */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Receipt className="w-5 h-5 text-amber-500" />
+                    <h2 className="text-xl font-bold text-neutral-900">Proof of Payment (PoP) Records</h2>
+                  </div>
+                  <p className="text-xs text-neutral-500 mt-0.5">
+                    Receive, verify, and confirm tenant R299,99 subscription payment receipts for Capitec Account Matthews (1334067366, Ref: Sub299)
+                  </p>
+                </div>
+
+                <div className="p-2.5 bg-neutral-900 text-white rounded-2xl flex items-center gap-3 text-xs shrink-0 shadow-sm">
+                  <div className="p-1.5 bg-amber-400 text-neutral-950 rounded-xl font-bold">
+                    <CreditCard className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold text-neutral-400 uppercase">Capitec Banking Account</p>
+                    <p className="font-bold text-amber-400">Matthews • 1334067366 • Sub299</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* PoP Overview Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="p-4 bg-white rounded-2xl border border-neutral-200 shadow-xs flex items-center justify-between">
+                  <div>
+                    <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider block">Pending Review</span>
+                    <p className="text-xl font-black text-amber-600">{pendingPopCount} Receipts</p>
+                  </div>
+                  <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center font-bold">
+                    <Clock className="w-5 h-5" />
+                  </div>
+                </div>
+
+                <div className="p-4 bg-white rounded-2xl border border-neutral-200 shadow-xs flex items-center justify-between">
+                  <div>
+                    <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider block">Verified Subscriptions</span>
+                    <p className="text-xl font-black text-emerald-600">
+                      {tenantActivations.filter((t) => t.subscriptionVerificationStatus === 'verified' || t.subscriptionPaid).length} Active
+                    </p>
+                  </div>
+                  <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
+                    <CheckCircle2 className="w-5 h-5" />
+                  </div>
+                </div>
+
+                <div className="p-4 bg-white rounded-2xl border border-neutral-200 shadow-xs flex items-center justify-between">
+                  <div>
+                    <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider block">Total Received</span>
+                    <p className="text-xl font-black text-neutral-900">
+                      R{(tenantActivations.filter((t) => t.subscriptionPaid).length * 299.99).toFixed(2).replace('.', ',')}
+                    </p>
+                  </div>
+                  <div className="w-10 h-10 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center font-bold">
+                    <DollarSign className="w-5 h-5" />
+                  </div>
+                </div>
+              </div>
+
+              {/* PoP Documents List */}
+              {tenantActivations.length === 0 ? (
+                <div className="p-12 bg-neutral-50 rounded-3xl border border-dashed border-neutral-200 text-center">
+                  <Receipt className="w-12 h-12 text-neutral-300 mx-auto mb-3" />
+                  <h3 className="text-sm font-bold text-neutral-700">No Proof of Payment Receipts</h3>
+                  <p className="text-xs text-neutral-500 mt-1">Tenant subscription payment receipts will appear here once uploaded.</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {tenantActivations.map((item) => {
+                    const isVerified = item.subscriptionVerificationStatus === 'verified';
+                    const isPendingPop = item.subscriptionVerificationStatus === 'in_review' || (item.proofOfPaymentFileName && !isVerified);
+
+                    return (
+                      <div
+                        key={`pop-card-${item.id}`}
+                        id={`pop-receipt-card-${item.id}`}
+                        className="p-5 bg-white rounded-3xl border border-neutral-200 shadow-xs space-y-4 hover:border-neutral-300 transition-all"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-center gap-3">
+                            <div className="w-12 h-12 rounded-2xl overflow-hidden border border-neutral-200 bg-neutral-100 shrink-0 flex items-center justify-center">
+                              {item.profilePicture ? (
+                                <img
+                                  src={item.profilePicture}
+                                  alt={item.fullName}
+                                  referrerPolicy="no-referrer"
+                                  className="w-full h-full object-cover"
+                                />
+                              ) : (
+                                <User className="w-6 h-6 text-neutral-400" />
+                              )}
+                            </div>
+                            <div>
+                              <p className="text-sm font-black text-neutral-900">{item.fullName}</p>
+                              <p className="text-xs text-neutral-500">{item.email}</p>
+                              <p className="text-[11px] font-mono font-bold text-amber-600 mt-0.5">
+                                Ref: {item.subscriptionReference || 'Sub299'} • R299,99
+                              </p>
+                            </div>
+                          </div>
+
+                          <span
+                            className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold border ${
+                              isVerified
+                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                : isPendingPop
+                                ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                : 'bg-neutral-100 text-neutral-600 border-neutral-200'
+                            }`}
+                          >
+                            {isVerified ? 'Payment Verified' : isPendingPop ? 'PoP Under Review (15-25m)' : 'No PoP Uploaded'}
+                          </span>
+                        </div>
+
+                        {/* Uploaded Document Info Card */}
+                        {item.proofOfPaymentFileName ? (
+                          <div className="p-3 bg-neutral-50 rounded-2xl border border-neutral-200 flex items-center justify-between text-xs">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <FileCheck2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                              <span className="font-bold text-neutral-800 truncate">{item.proofOfPaymentFileName}</span>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => setPopPreviewModal(item)}
+                              className="px-2.5 py-1 bg-neutral-900 hover:bg-neutral-800 text-white rounded-xl text-[11px] font-bold flex items-center gap-1 shrink-0 cursor-pointer transition-colors"
+                            >
+                              <Eye className="w-3 h-3 text-amber-400" />
+                              <span>View Receipt</span>
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="p-3 bg-amber-50/60 rounded-2xl border border-amber-100 text-xs text-amber-800 flex items-center justify-between">
+                            <span>Direct Capitec Payment (No document attached)</span>
+                            <span className="font-mono font-bold text-neutral-800">Ref: Sub299</span>
+                          </div>
+                        )}
+
+                        {/* Action Bar */}
+                        <div className="flex items-center justify-between pt-2 border-t border-neutral-100 text-xs">
+                          <span className="text-[10px] text-neutral-400">
+                            {item.proofOfPaymentSubmittedAt
+                              ? `Uploaded ${new Date(item.proofOfPaymentSubmittedAt).toLocaleDateString()}`
+                              : `Requested ${new Date(item.requestedAt).toLocaleDateString()}`}
+                          </span>
+
+                          <div className="flex items-center gap-2">
+                            {!isVerified && (
+                              <button
+                                type="button"
+                                onClick={() => handleRejectPoP(item.id)}
+                                className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 rounded-xl font-bold flex items-center gap-1 cursor-pointer border border-red-200 transition-colors"
+                              >
+                                <XCircle className="w-3.5 h-3.5" />
+                                <span>Reject PoP</span>
+                              </button>
+                            )}
+
+                            <button
+                              type="button"
+                              onClick={() => handleVerifyPoP(item.id)}
+                              className={`px-3.5 py-1.5 rounded-xl font-black flex items-center gap-1 cursor-pointer transition-colors shadow-xs ${
+                                isVerified
+                                  ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+                                  : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                              }`}
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>{isVerified ? 'Verified' : 'Verify R299,99 Payment'}</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </motion.div>
+          )}
+
           {/* Feature 5: System (Clean White Canvas) */}
           {activeAdminTab === 'system' && (
             <motion.div
@@ -791,6 +1042,120 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             onApprove={handleApprove}
             onReject={handleReject}
           />
+        )}
+
+        {/* PoP Receipt Document Preview Modal */}
+        {popPreviewModal && (
+          <motion.div
+            id="modal-admin-pop-document-preview"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-neutral-950/80 backdrop-blur-md flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-lg bg-white rounded-3xl p-6 shadow-2xl border border-neutral-100 space-y-5"
+            >
+              <div className="flex items-center justify-between border-b border-neutral-100 pb-3">
+                <div className="flex items-center gap-2">
+                  <Receipt className="w-5 h-5 text-amber-500" />
+                  <div>
+                    <h3 className="text-base font-extrabold text-neutral-900">Proof of Payment Document</h3>
+                    <p className="text-xs text-neutral-500">
+                      Uploaded by <span className="font-bold text-neutral-900">{popPreviewModal.fullName}</span>
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setPopPreviewModal(null)}
+                  className="p-1.5 text-neutral-400 hover:text-neutral-900 hover:bg-neutral-100 rounded-xl transition-colors cursor-pointer"
+                >
+                  <XCircle className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Document Image / File View Canvas */}
+              <div className="bg-neutral-900 rounded-2xl p-4 text-center min-h-[220px] flex flex-col items-center justify-center border border-neutral-800">
+                {popPreviewModal.proofOfPaymentFile && popPreviewModal.proofOfPaymentFile.startsWith('data:image') ? (
+                  <img
+                    src={popPreviewModal.proofOfPaymentFile}
+                    alt="Proof of Payment Screenshot"
+                    className="max-h-[300px] w-auto object-contain rounded-xl shadow-md border border-neutral-700"
+                  />
+                ) : (
+                  <div className="space-y-3 text-white">
+                    <div className="w-16 h-16 rounded-2xl bg-amber-400/20 border border-amber-400/40 text-amber-400 flex items-center justify-center mx-auto">
+                      <FileCheck2 className="w-8 h-8" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold text-white">{popPreviewModal.proofOfPaymentFileName || 'Proof_Document.pdf'}</p>
+                      <p className="text-xs text-neutral-400 mt-1">Payment Reference: Sub299 (R299,99)</p>
+                    </div>
+                    {popPreviewModal.proofOfPaymentFile && (
+                      <a
+                        href={popPreviewModal.proofOfPaymentFile}
+                        download={popPreviewModal.proofOfPaymentFileName || 'Proof_Of_Payment.pdf'}
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-amber-400 text-neutral-950 font-black rounded-xl text-xs shadow-md transition-all hover:bg-amber-300"
+                      >
+                        <Download className="w-4 h-4" />
+                        <span>Download Original Document</span>
+                      </a>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="p-3.5 bg-neutral-50 rounded-2xl border border-neutral-200 text-xs space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-neutral-500">Capitec Account:</span>
+                  <span className="font-bold text-neutral-900">Matthews (Acc: 1334067366)</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-neutral-500">Reference:</span>
+                  <span className="font-mono font-bold text-amber-600">Sub299</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-neutral-500">Submission Date:</span>
+                  <span className="font-medium text-neutral-800">
+                    {popPreviewModal.proofOfPaymentSubmittedAt
+                      ? new Date(popPreviewModal.proofOfPaymentSubmittedAt).toLocaleString()
+                      : 'Just now'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Modal Actions */}
+              <div className="flex items-center gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleRejectPoP(popPreviewModal.id);
+                    setPopPreviewModal(null);
+                  }}
+                  className="flex-1 py-3 bg-red-50 hover:bg-red-100 text-red-700 font-extrabold rounded-2xl text-xs border border-red-200 transition-colors cursor-pointer"
+                >
+                  Reject Proof
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleVerifyPoP(popPreviewModal.id);
+                    setPopPreviewModal(null);
+                  }}
+                  className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-2xl text-xs transition-colors shadow-md cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Verify R299,99 Payment</span>
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>

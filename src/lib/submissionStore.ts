@@ -1,4 +1,5 @@
 import { SubmissionRecord, ProfileData } from '../types';
+import { safeStringify } from './utils';
 
 const STORAGE_KEY = 'app_admin_submissions';
 const USER_PROFILE_KEY = 'app_user_profile';
@@ -9,11 +10,7 @@ export const getStoredSubmissions = (): SubmissionRecord[] => {
     if (raw) {
       const list = JSON.parse(raw);
       if (Array.isArray(list)) {
-        // Filter out any leftover mock user seeds if previously saved
-        const realSubmissions = list.filter(
-          (s) => s.isCurrentUser || (!s.id?.startsWith('sub-00') && s.id !== 'sub-001' && s.id !== 'sub-002' && s.id !== 'sub-003')
-        );
-        return realSubmissions;
+        return list;
       }
     }
   } catch {
@@ -24,7 +21,7 @@ export const getStoredSubmissions = (): SubmissionRecord[] => {
 
 export const saveSubmissions = (submissions: SubmissionRecord[]): void => {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(submissions));
+    localStorage.setItem(STORAGE_KEY, safeStringify(submissions));
   } catch {
     // ignore
   }
@@ -77,7 +74,7 @@ export const approveSubmission = (id: string): SubmissionRecord | null => {
         const userObj = JSON.parse(rawUser);
         userObj.status = 'approved';
         userObj.reviewedAt = updatedItem.reviewedAt;
-        localStorage.setItem(USER_PROFILE_KEY, JSON.stringify(userObj));
+        localStorage.setItem(USER_PROFILE_KEY, safeStringify(userObj));
       }
     } catch {
       // ignore
@@ -111,7 +108,7 @@ export const rejectSubmission = (id: string, reason: string): SubmissionRecord |
         userObj.status = 'rejected';
         userObj.rejectionReason = updatedItem.rejectionReason;
         userObj.reviewedAt = updatedItem.reviewedAt;
-        localStorage.setItem(USER_PROFILE_KEY, JSON.stringify(userObj));
+        localStorage.setItem(USER_PROFILE_KEY, safeStringify(userObj));
       }
     } catch {
       // ignore

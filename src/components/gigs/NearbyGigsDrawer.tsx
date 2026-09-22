@@ -1,6 +1,7 @@
 import React from 'react';
 import { MapGig } from '../../types';
 import { GIG_CATEGORIES_METADATA } from '../../lib/gigStore';
+import { openNativeNavigation } from '../../lib/utils';
 import {
   Compass,
   MapPin,
@@ -10,6 +11,7 @@ import {
   Plus,
   ArrowRight,
   Sparkles,
+  Navigation,
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -193,9 +195,24 @@ export const NearbyGigsDrawer: React.FC<NearbyGigsDrawerProps> = ({
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-1 font-semibold text-neutral-800 group-hover:translate-x-0.5 transition-transform">
-                      <span>View & Apply</span>
-                      <ArrowRight className="w-3 h-3 text-neutral-400 group-hover:text-neutral-900" />
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openNativeNavigation(gig.lat, gig.lng);
+                        }}
+                        className="p-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-800 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer"
+                        title="Open directions in device map app"
+                      >
+                        <Navigation className="w-3 h-3 text-amber-600 fill-amber-600" />
+                        <span>Directions</span>
+                      </button>
+
+                      <div className="flex items-center gap-1 font-semibold text-neutral-800 group-hover:translate-x-0.5 transition-transform">
+                        <span>View & Apply</span>
+                        <ArrowRight className="w-3 h-3 text-neutral-400 group-hover:text-neutral-900" />
+                      </div>
                     </div>
                   </div>
                 </div>

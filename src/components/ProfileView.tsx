@@ -9,6 +9,7 @@ import { ProfileInReview } from './profile/ProfileInReview';
 import { submitUserProfile } from '../lib/submissionStore';
 import { motion, AnimatePresence } from 'motion/react';
 import { Check, Lock, ArrowLeft } from 'lucide-react';
+import { safeStringify } from '../lib/utils';
 
 const INITIAL_PROFILE: ProfileData = {
   fullName: '',
@@ -90,7 +91,7 @@ export const ProfileView: React.FC = () => {
 
   useEffect(() => {
     try {
-      localStorage.setItem('app_user_profile', JSON.stringify(profileData));
+      localStorage.setItem('app_user_profile', safeStringify(profileData));
       // Notify other components of profile picture or data updates
       window.dispatchEvent(new Event('app-profile-updated'));
     } catch {

@@ -6,9 +6,19 @@ import {
   UserSearch,
   Briefcase,
   FileText,
+  Share2,
+  CreditCard,
 } from 'lucide-react';
 
-export type TenantTab = 'overview' | 'verification' | 'active_tenants' | 'active_seekers' | 'active_gigs' | 'agreement_forms';
+export type TenantTab =
+  | 'overview'
+  | 'invite_income'
+  | 'subscription'
+  | 'verification'
+  | 'active_tenants'
+  | 'active_seekers'
+  | 'active_gigs'
+  | 'agreement_forms';
 
 interface TenantBottomNavBarProps {
   activeTab: TenantTab;
@@ -21,11 +31,11 @@ export const TenantBottomNavBar: React.FC<TenantBottomNavBarProps> = ({
 }) => {
   const tabs = [
     { id: 'overview', label: 'Overview', icon: LayoutDashboard },
-    { id: 'verification', label: 'Verification', icon: ShieldCheck },
+    { id: 'invite_income', label: 'Invite & Earn', icon: Share2 },
+    { id: 'subscription', label: 'Subscription', icon: CreditCard },
     { id: 'active_tenants', label: 'Tenants', icon: Users },
     { id: 'active_seekers', label: 'Seekers', icon: UserSearch },
     { id: 'active_gigs', label: 'GiGs', icon: Briefcase },
-    { id: 'agreement_forms', label: 'Forms', icon: FileText },
   ] as const;
 
   return (

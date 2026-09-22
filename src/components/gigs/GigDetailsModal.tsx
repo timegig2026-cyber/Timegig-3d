@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { MapGig } from '../../types';
 import { GIG_CATEGORIES_METADATA, applyToMapGig } from '../../lib/gigStore';
 import { useUserProfile } from '../../lib/useUserProfile';
+import { openNativeNavigation } from '../../lib/utils';
 import {
   MapPin,
   X,
@@ -15,6 +16,7 @@ import {
   Phone,
   Loader2,
   Navigation,
+  ExternalLink,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -167,15 +169,27 @@ export const GigDetailsModal: React.FC<GigDetailsModalProps> = ({
                 </p>
               </div>
 
-              {arrivalComplete && (
+              <div className="w-full space-y-2 pt-2">
                 <button
                   type="button"
-                  onClick={onClose}
-                  className="w-full py-3 bg-neutral-900 text-white rounded-2xl font-bold text-xs shadow-md"
+                  onClick={() => openNativeNavigation(gig.lat, gig.lng)}
+                  className="w-full py-3 bg-amber-500 hover:bg-amber-600 text-neutral-950 font-extrabold rounded-2xl text-xs shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-98"
                 >
-                  Close & Start GiG
+                  <Navigation className="w-4 h-4 fill-neutral-950" />
+                  <span>Launch Directions on Map App</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
                 </button>
-              )}
+
+                {arrivalComplete && (
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="w-full py-3 bg-neutral-900 text-white rounded-2xl font-bold text-xs shadow-md"
+                  >
+                    Close & Start GiG
+                  </button>
+                )}
+              </div>
             </motion.div>
           ) : isAccepted ? (
             <div className="p-6 text-center space-y-4">
@@ -241,15 +255,29 @@ export const GigDetailsModal: React.FC<GigDetailsModalProps> = ({
                 </div>
               </div>
 
-          {/* Location Pin */}
-          <div className="flex items-start gap-2.5 p-2.5 bg-neutral-50 rounded-xl border border-neutral-200">
-            <MapPin className="w-4 h-4 text-neutral-500 shrink-0 mt-0.5" />
-            <div className="flex-1 min-w-0">
-              <span className="text-[10px] text-neutral-400 font-medium">Location Pin</span>
-              <p className="text-xs font-semibold text-neutral-800 leading-snug">
-                {gig.locationName}
-              </p>
+          {/* Location Pin & Navigation Button */}
+          <div className="flex items-center justify-between gap-2.5 p-2.5 bg-neutral-50 rounded-xl border border-neutral-200">
+            <div className="flex items-start gap-2 min-w-0">
+              <MapPin className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                <span className="text-[10px] text-neutral-400 font-medium">Location Pin</span>
+                <p className="text-xs font-semibold text-neutral-800 leading-snug truncate">
+                  {gig.locationName}
+                </p>
+              </div>
             </div>
+
+            <button
+              id="btn-navigate-gig-maps"
+              type="button"
+              onClick={() => openNativeNavigation(gig.lat, gig.lng)}
+              className="px-2.5 py-1.5 bg-neutral-900 hover:bg-neutral-800 text-amber-400 rounded-lg text-[11px] font-bold flex items-center gap-1 shrink-0 shadow-xs transition-all cursor-pointer active:scale-95"
+              title="Open turn-by-turn navigation in device map app"
+            >
+              <Navigation className="w-3.5 h-3.5 fill-amber-400" />
+              <span>Navigate</span>
+              <ExternalLink className="w-3 h-3 text-amber-400/80" />
+            </button>
           </div>
 
           {/* Task Description */}

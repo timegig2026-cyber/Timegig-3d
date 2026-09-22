@@ -47,7 +47,7 @@ export interface ProfileData {
   lng?: number;
 }
 
-export type AdminFeatureTab = 'submissions' | 'seekers' | 'gigs' | 'tenant' | 'system';
+export type AdminFeatureTab = 'submissions' | 'seekers' | 'gigs' | 'tenant' | 'pop' | 'system';
 
 export interface SubmissionRecord extends ProfileData {
   id: string;
@@ -166,6 +166,30 @@ export interface TenantActivation {
   requestedAt: string;
   reviewedAt?: string;
   rejectionReason?: string;
+  inviteCode?: string;
+  inviteUrl?: string;
+  invitedUsersCount?: number;
+  monthlyPassiveEarnings?: string;
+  subscriptionPaid?: boolean;
+  subscriptionPaidAt?: string;
+  subscriptionReference?: string;
+  proofOfPaymentFile?: string | null;
+  proofOfPaymentFileName?: string;
+  proofOfPaymentSubmittedAt?: string;
+  subscriptionVerificationStatus?: 'none' | 'in_review' | 'verified';
+}
+
+export interface TenantReferredUser {
+  id: string;
+  fullName: string;
+  email: string;
+  phone: string;
+  joinedAt: string;
+  status: 'active' | 'suspended' | 'pending';
+  userType: 'Seeker' | 'Gig Poster' | 'Sub-Tenant';
+  location: string;
+  monthlyIncomeGenerated: string;
+  notes?: string;
 }
 
 export interface TenantProperty {

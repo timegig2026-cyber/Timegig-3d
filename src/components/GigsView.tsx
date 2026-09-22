@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import * as maplibregl from 'maplibre-gl';
-import 'maplibre-gl/dist/maplibre-gl.css';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import {
   Globe,
   Locate,
@@ -18,7 +18,6 @@ import {
   Loader2,
   ChevronUp,
   Compass,
-  Box,
 } from 'lucide-react';
 import { ProfileData, MapGig, GeocodeLocation } from '../types';
 import { getStoredMapGigs, GIG_CATEGORIES_METADATA } from '../lib/gigStore';
@@ -30,13 +29,14 @@ import { AnimatePresence, motion } from 'motion/react';
 
 export const GigsView: React.FC = () => {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
-  const mapInstanceRef = useRef<maplibregl.Map | null>(null);
-  const userMarkerRef = useRef<maplibregl.Marker | null>(null);
-  const accuracyCircleRef = useRef<maplibregl.Marker | null>(null); // MapLibre doesn't have a simple Circle class like Leaflet, we'll use a source/layer
-  const gigMarkersRef = useRef<maplibregl.Marker[]>([]);
+  const mapInstanceRef = useRef<L.Map | null>(null);
+  const osmLayerRef = useRef<L.TileLayer | null>(null);
+  const satLayerRef = useRef<L.TileLayer | null>(null);
+  const userMarkerRef = useRef<L.Marker | null>(null);
+  const searchMarkerRef = useRef<L.Marker | null>(null);
+  const gigMarkersRef = useRef<L.Marker[]>([]);
 
   const [mapLayerType, setMapLayerType] = useState<'standard' | 'satellite'>('standard');
-  const [is3dMode, setIs3dMode] = useState<boolean>(false);
   const [userLocation, setUserLocation] = useState<{
     lat: number;
     lng: number;
@@ -194,175 +194,157 @@ export const GigsView: React.FC = () => {
     displayName: string,
     address?: Record<string, string>
   ) => {
-    if (!mapInstanceRef.current || isNaN(lat) || isNaN(lng)) return;
-
     const map = mapInstanceRef.current;
+    if (!map || isNaN(lat) || isNaN(lng)) return;
+
     setActiveSearchResult({ displayName, lat, lng });
 
-    const el = document.createElement('div');
-    el.className = 'custom-search-map-pin';
-    el.innerHTML = `
-      <div class="relative flex items-center justify-center -translate-x-1/2 -translate-y-1/2" style="width: 44px; height: 44px;">
-        <div class="absolute inset-0 rounded-full bg-rose-500/25 animate-ping"></div>
-        <div class="relative w-9 h-9 rounded-2xl bg-rose-600 text-white shadow-xl flex items-center justify-center border-2 border-white">
-          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-          </svg>
-        </div>
-        <div class="absolute -bottom-1.5 w-2.5 h-2.5 bg-rose-700 rotate-45"></div>
-      </div>
-    `;
+    if (searchMarkerRef.current) {
+      searchMarkerRef.current.remove();
+    }
 
-    // Clear old search marker if any
-    const popup = new maplibregl.Popup({ offset: 25 })
-      .setHTML(`
-        <div style="font-family: sans-serif; font-size: 12px; padding: 4px; max-width: 220px;">
+    const searchIcon = L.divIcon({
+      className: 'custom-search-pin-leaflet',
+      html: `
+        <div class="relative flex items-center justify-center -translate-x-1/2 -translate-y-1/2" style="width: 44px; height: 44px;">
+          <div class="absolute inset-0 rounded-full bg-rose-500/25 animate-ping"></div>
+          <div class="relative w-9 h-9 rounded-2xl bg-rose-600 text-white shadow-xl flex items-center justify-center border-2 border-white">
+            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </div>
+          <div class="absolute -bottom-1.5 w-2.5 h-2.5 bg-rose-700 rotate-45"></div>
+        </div>
+      `,
+      iconSize: [44, 44],
+      iconAnchor: [22, 22],
+    });
+
+    const marker = L.marker([lat, lng], { icon: searchIcon }).addTo(map);
+    marker
+      .bindPopup(
+        `<div style="font-family: sans-serif; font-size: 12px; padding: 4px; max-width: 220px;">
           <div style="font-weight: 700; color: #0f172a; font-size: 13px; margin-bottom: 3px;">
             ${address?.road || displayName.split(',')[0]}
           </div>
           <div style="color: #64748b; font-size: 10px;">
             Exact Coordinates: ${lat.toFixed(5)}, ${lng.toFixed(5)}
           </div>
-        </div>
-      `);
+        </div>`
+      )
+      .openPopup();
 
-    new maplibregl.Marker({ element: el })
-      .setLngLat([lng, lat])
-      .setPopup(popup)
-      .addTo(map);
-
-    map.flyTo({
-      center: [lng, lat],
-      zoom: 17,
-      essential: true,
-      duration: 1500
-    });
+    searchMarkerRef.current = marker;
+    map.flyTo([lat, lng], 16, { duration: 1.5 });
   };
 
-  // Initialize MapLibre GL
+  // Initialize Leaflet Map
   useEffect(() => {
     const container = mapContainerRef.current;
     if (!container || mapInstanceRef.current) return;
 
-    const map = new maplibregl.Map({
-      container: container,
-      style: 'https://demotiles.maplibre.org/style.json',
-      center: [24.8, -28.5],
+    const map = L.map(container, {
+      center: [-28.5, 24.8],
       zoom: 3,
-      pitch: 0,
-      bearing: 0,
-      antialias: true,
+      zoomControl: false,
+      attributionControl: false,
     });
 
-    map.on('load', () => {
-      // Add Satellite layer
-      map.addSource('satellite', {
-        type: 'raster',
-        tiles: ['https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
-        tileSize: 256
-      });
-      map.addLayer({
-        id: 'satellite-layer',
-        type: 'raster',
-        source: 'satellite',
-        layout: { visibility: 'none' }
-      });
+    const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap contributors',
     });
 
-    map.on('click', (e) => {
+    const satLayer = L.tileLayer(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      {
+        maxZoom: 19,
+        attribution: 'Tiles &copy; Esri World Imagery',
+      }
+    );
+
+    osmLayer.addTo(map);
+    osmLayerRef.current = osmLayer;
+    satLayerRef.current = satLayer;
+
+    map.on('click', (e: L.LeafletMouseEvent) => {
       setPendingGigLocation({
-        lat: e.lngLat.lat,
-        lng: e.lngLat.lng,
+        lat: e.latlng.lat,
+        lng: e.latlng.lng,
       });
     });
 
     mapInstanceRef.current = map;
 
+    const resizeObserver = new ResizeObserver(() => {
+      map.invalidateSize();
+    });
+    resizeObserver.observe(container);
+
+    setTimeout(() => map.invalidateSize(), 300);
+
     return () => {
+      resizeObserver.disconnect();
       map.remove();
       mapInstanceRef.current = null;
     };
   }, []);
 
-  // Handle 3D Mode changes
+  // Handle Satellite vs Standard view toggle
   useEffect(() => {
     const map = mapInstanceRef.current;
-    if (!map) return;
+    if (!map || !osmLayerRef.current || !satLayerRef.current) return;
 
-    if (is3dMode) {
-      map.easeTo({
-        pitch: 60,
-        bearing: -17,
-        duration: 1200,
-      });
+    if (mapLayerType === 'satellite') {
+      if (map.hasLayer(osmLayerRef.current)) map.removeLayer(osmLayerRef.current);
+      if (!map.hasLayer(satLayerRef.current)) satLayerRef.current.addTo(map);
     } else {
-      map.easeTo({
-        pitch: 0,
-        bearing: 0,
-        duration: 1200,
-      });
+      if (map.hasLayer(satLayerRef.current)) map.removeLayer(satLayerRef.current);
+      if (!map.hasLayer(osmLayerRef.current)) osmLayerRef.current.addTo(map);
     }
-  }, [is3dMode]);
+  }, [mapLayerType]);
 
   // Update Gig Markers
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
 
-    // Clear old
-    gigMarkersRef.current.forEach(m => m.remove());
+    // Clear old markers
+    gigMarkersRef.current.forEach((m) => m.remove());
     gigMarkersRef.current = [];
 
-    gigs.forEach(gig => {
+    gigs.forEach((gig) => {
       const meta = GIG_CATEGORIES_METADATA[gig.category] || GIG_CATEGORIES_METADATA.general;
-      const el = document.createElement('div');
-      el.className = 'custom-gig-pin';
-      el.innerHTML = `
-        <div class="group relative flex items-center justify-center -translate-x-1/2 -translate-y-1/2 cursor-pointer transition-transform hover:scale-110 active:scale-95" style="width: 52px; height: 52px;">
-          <div class="absolute inset-0 rounded-full bg-neutral-900/15 animate-ping"></div>
-          <div class="relative flex flex-col items-center">
-            <div class="px-2 py-0.5 bg-neutral-900 text-white rounded-full text-[9px] font-extrabold shadow-md mb-0.5 border border-white/40 whitespace-nowrap">
-              ${gig.pay}
+
+      const customIcon = L.divIcon({
+        className: 'custom-gig-pin-leaflet',
+        html: `
+          <div class="group relative flex items-center justify-center -translate-x-1/2 -translate-y-1/2 cursor-pointer transition-transform hover:scale-110 active:scale-95" style="width: 52px; height: 52px;">
+            <div class="absolute inset-0 rounded-full bg-neutral-900/15 animate-ping"></div>
+            <div class="relative flex flex-col items-center">
+              <div class="px-2 py-0.5 bg-neutral-900 text-white rounded-full text-[9px] font-extrabold shadow-md mb-0.5 border border-white/40 whitespace-nowrap">
+                ${gig.pay}
+              </div>
+              <div class="w-9 h-9 rounded-2xl bg-white border-2 border-neutral-900 shadow-xl flex items-center justify-center text-base">
+                ${meta.icon}
+              </div>
+              <div class="w-2 h-2 bg-neutral-900 rotate-45 -mt-1 rounded-[1px]"></div>
             </div>
-            <div class="w-9 h-9 rounded-2xl bg-white border-2 border-neutral-900 shadow-xl flex items-center justify-center text-base">
-              ${meta.icon}
-            </div>
-            <div class="w-2 h-2 bg-neutral-900 rotate-45 -mt-1 rounded-[1px]"></div>
           </div>
-        </div>
-      `;
+        `,
+        iconSize: [52, 52],
+        iconAnchor: [26, 26],
+      });
 
-      el.onclick = (e) => {
-        e.stopPropagation();
+      const marker = L.marker([gig.lat, gig.lng], { icon: customIcon }).addTo(map);
+      marker.on('click', () => {
         setSelectedGig(gig);
-      };
+      });
 
-      const marker = new maplibregl.Marker({ element: el })
-        .setLngLat([gig.lng, gig.lat])
-        .addTo(map);
-      
       gigMarkersRef.current.push(marker);
     });
   }, [gigs]);
-
-  // Update Visibility
-  useEffect(() => {
-    const map = mapInstanceRef.current;
-    if (!map) return;
-
-    const updateVisibility = () => {
-      if (map.getLayer('satellite-layer')) {
-        map.setLayoutProperty('satellite-layer', 'visibility', mapLayerType === 'satellite' ? 'visible' : 'none');
-      }
-    };
-
-    if (map.isStyleLoaded()) {
-      updateVisibility();
-    } else {
-      map.on('idle', updateVisibility);
-    }
-  }, [mapLayerType]);
 
   // Request & Watch Geolocation
   useEffect(() => {
@@ -376,38 +358,37 @@ export const GigsView: React.FC = () => {
 
     const handleSuccess = (pos: GeolocationPosition) => {
       const { latitude, longitude, accuracy } = pos.coords;
-      const coords = { lat: latitude, lng: longitude, accuracy };
-      setUserLocation(coords);
+      setUserLocation({ lat: latitude, lng: longitude, accuracy });
       setLocationError(null);
       setIsLocating(false);
 
-      if (mapInstanceRef.current) {
-        const map = mapInstanceRef.current;
-
+      const map = mapInstanceRef.current;
+      if (map) {
         const avatarUrl = userProfile?.profilePicture;
-        const el = document.createElement('div');
-        el.className = 'custom-user-map-pin';
-        el.innerHTML = `
-          <div class="relative flex items-center justify-center -translate-x-1/2 -translate-y-1/2" style="width: 48px; height: 48px;">
-            <div class="absolute inset-0 rounded-full bg-sky-500/25 animate-ping"></div>
-            <div class="absolute w-9 h-9 rounded-full bg-sky-500/35 backdrop-blur-xs"></div>
-            <div class="relative w-8 h-8 rounded-full bg-white border-2 border-sky-500 shadow-md flex items-center justify-center overflow-hidden">
-              ${
-                avatarUrl
-                  ? `<img src="${avatarUrl}" alt="You" class="w-full h-full object-cover" />`
-                  : `<div class="w-full h-full bg-neutral-900 text-white flex items-center justify-center font-bold text-[11px]">You</div>`
-              }
+        const userIcon = L.divIcon({
+          className: 'custom-user-pin-leaflet',
+          html: `
+            <div class="relative flex items-center justify-center -translate-x-1/2 -translate-y-1/2" style="width: 48px; height: 48px;">
+              <div class="absolute inset-0 rounded-full bg-sky-500/25 animate-ping"></div>
+              <div class="absolute w-9 h-9 rounded-full bg-sky-500/35 backdrop-blur-xs"></div>
+              <div class="relative w-8 h-8 rounded-full bg-white border-2 border-sky-500 shadow-md flex items-center justify-center overflow-hidden">
+                ${
+                  avatarUrl
+                    ? `<img src="${avatarUrl}" alt="You" class="w-full h-full object-cover" />`
+                    : `<div class="w-full h-full bg-neutral-900 text-white flex items-center justify-center font-bold text-[11px]">You</div>`
+                }
+              </div>
+              <div class="absolute -bottom-1 w-2 h-2 bg-sky-600 rotate-45 rounded-[1px]"></div>
             </div>
-            <div class="absolute -bottom-1 w-2 h-2 bg-sky-600 rotate-45 rounded-[1px]"></div>
-          </div>
-        `;
+          `,
+          iconSize: [48, 48],
+          iconAnchor: [24, 24],
+        });
 
         if (userMarkerRef.current) {
-          userMarkerRef.current.setLngLat([longitude, latitude]);
+          userMarkerRef.current.setLatLng([latitude, longitude]);
         } else {
-          userMarkerRef.current = new maplibregl.Marker({ element: el })
-            .setLngLat([longitude, latitude])
-            .addTo(map);
+          userMarkerRef.current = L.marker([latitude, longitude], { icon: userIcon }).addTo(map);
         }
       }
     };
@@ -428,15 +409,11 @@ export const GigsView: React.FC = () => {
       maximumAge: 0,
     });
 
-    const watchId = navigator.geolocation.watchPosition(
-      handleSuccess,
-      handleError,
-      {
-        enableHighAccuracy: true,
-        timeout: 15000,
-        maximumAge: 10000,
-      }
-    );
+    const watchId = navigator.geolocation.watchPosition(handleSuccess, handleError, {
+      enableHighAccuracy: true,
+      timeout: 15000,
+      maximumAge: 10000,
+    });
 
     return () => {
       navigator.geolocation.clearWatch(watchId);
@@ -445,37 +422,21 @@ export const GigsView: React.FC = () => {
 
   // Center on entire World
   const handleShowWorld = () => {
-    if (!mapInstanceRef.current) return;
-    mapInstanceRef.current.flyTo({
-      center: [24, -28],
-      zoom: 3,
-      essential: true,
-      duration: 1200
-    });
+    mapInstanceRef.current?.setView([-28.5, 24.8], 3);
   };
 
   // Center on user's exact location
   const handleCenterOnUser = () => {
     if (!mapInstanceRef.current) return;
     if (userLocation) {
-      mapInstanceRef.current.flyTo({
-        center: [userLocation.lng, userLocation.lat],
-        zoom: 16,
-        essential: true,
-        duration: 1200
-      });
+      mapInstanceRef.current.flyTo([userLocation.lat, userLocation.lng], 16, { duration: 1.2 });
     } else {
       setIsLocating(true);
       navigator.geolocation.getCurrentPosition(
         (pos) => {
           const { latitude, longitude, accuracy } = pos.coords;
           setUserLocation({ lat: latitude, lng: longitude, accuracy });
-          mapInstanceRef.current?.flyTo({
-            center: [longitude, latitude],
-            zoom: 16,
-            essential: true,
-            duration: 1200
-          });
+          mapInstanceRef.current?.flyTo([latitude, longitude], 16, { duration: 1.2 });
           setIsLocating(false);
         },
         (err) => {
@@ -500,14 +461,8 @@ export const GigsView: React.FC = () => {
     setActionToast(`GiG "${newGig.title}" pinned on map!`);
     setTimeout(() => setActionToast(null), 4000);
 
-    // Fly smoothly to new gig
     if (mapInstanceRef.current) {
-      mapInstanceRef.current.flyTo({
-        center: [newGig.lng, newGig.lat],
-        zoom: 16,
-        essential: true,
-        duration: 1200
-      });
+      mapInstanceRef.current.flyTo([newGig.lat, newGig.lng], 16, { duration: 1.2 });
     }
   };
 
@@ -517,7 +472,7 @@ export const GigsView: React.FC = () => {
       className="relative w-full h-[calc(100vh-4rem)] flex flex-col bg-neutral-100 overflow-hidden"
       aria-label="GiGs OpenStreetMap and Satellite View"
     >
-      {/* Full-screen Leaflet Map Canvas (Extends to top of screen without top bar) */}
+      {/* Full-screen Map Canvas */}
       <div
         ref={mapContainerRef}
         id="openstreetmap-canvas"
@@ -528,7 +483,6 @@ export const GigsView: React.FC = () => {
       {/* Floating Search Bar on Top of Map */}
       <div className="absolute top-4 left-4 right-4 z-30 pointer-events-auto">
         {isSearchBarHidden ? (
-          /* Small Floating Search Icon & Nearby Button when hidden */
           <div className="flex items-center gap-2">
             <motion.button
               initial={{ scale: 0.8, opacity: 0 }}
@@ -561,7 +515,6 @@ export const GigsView: React.FC = () => {
             </motion.button>
           </div>
         ) : (
-          /* Full Floating Search Bar */
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -602,7 +555,6 @@ export const GigsView: React.FC = () => {
                   </button>
                 ) : null}
 
-                {/* Push-Up Button to hide into small search icon */}
                 <button
                   id="btn-push-up-search-bar"
                   type="button"
@@ -615,7 +567,6 @@ export const GigsView: React.FC = () => {
               </div>
             </form>
 
-            {/* Nearby GiGs Icon Button */}
             <button
               id="btn-nearby-gigs-top-bar"
               type="button"
@@ -630,7 +581,6 @@ export const GigsView: React.FC = () => {
               </span>
             </button>
 
-            {/* Autocomplete Dropdown List */}
             <AnimatePresence>
               {isDropdownOpen && (
                 <motion.div
@@ -798,21 +748,6 @@ export const GigsView: React.FC = () => {
           className="w-11 h-11 bg-neutral-900 hover:bg-neutral-800 text-amber-400 border border-neutral-700 rounded-2xl shadow-lg flex items-center justify-center transition-all cursor-pointer group active:scale-95"
         >
           <Compass className="w-5 h-5 transition-transform group-hover:scale-110" />
-        </button>
-
-        {/* Toggle 3D View Mode */}
-        <button
-          id="btn-toggle-3d-view"
-          type="button"
-          onClick={() => setIs3dMode((prev) => !prev)}
-          title={is3dMode ? 'Switch to 2D Top View' : 'Switch to 3D Perspective View'}
-          className={`w-11 h-11 backdrop-blur-md border rounded-2xl shadow-md flex items-center justify-center transition-all cursor-pointer group active:scale-95 ${
-            is3dMode
-              ? 'bg-neutral-900 border-neutral-700 text-sky-400'
-              : 'bg-white/95 border-neutral-200/90 text-neutral-800 hover:text-sky-600 hover:bg-white'
-          }`}
-        >
-          <Box className={`w-5 h-5 transition-transform group-hover:scale-110 ${is3dMode ? 'animate-pulse' : ''}`} />
         </button>
 
         {/* Toggle Satellite View vs Standard Map */}

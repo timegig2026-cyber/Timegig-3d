@@ -1,5 +1,6 @@
 import { UserActivity, HireProposal, SubmissionRecord, ProfileData } from '../types';
 import { getStoredSubmissions } from './submissionStore';
+import { safeStringify } from './utils';
 
 const ACTIVITIES_KEY = 'app_user_activities';
 const HIRE_PROPOSALS_KEY = 'app_hire_proposals';
@@ -28,9 +29,9 @@ export function recordActivity(activity: Omit<UserActivity, 'id' | 'timestamp'>)
     timestamp: new Date().toISOString(),
   };
 
-  const updated = [newActivity, ...current].slice(0, 50); // Keep last 50 activities
+  const updated = [newActivity, ...current].slice(0, 500); // Retain up to 500 activities
   try {
-    localStorage.setItem(ACTIVITIES_KEY, JSON.stringify(updated));
+    localStorage.setItem(ACTIVITIES_KEY, safeStringify(updated));
     window.dispatchEvent(new Event('app-activity-updated'));
   } catch {
     // ignore
@@ -63,7 +64,7 @@ export function createHireProposal(data: Omit<HireProposal, 'id' | 'createdAt' |
 
   const updated = [proposal, ...current];
   try {
-    localStorage.setItem(HIRE_PROPOSALS_KEY, JSON.stringify(updated));
+    localStorage.setItem(HIRE_PROPOSALS_KEY, safeStringify(updated));
     recordActivity({
       type: 'hire_sent',
       title: `Hire Proposal sent to ${data.seekerName}`,
@@ -97,14 +98,14 @@ export function getUserAvailability(): boolean {
 
 export function setUserAvailability(isAvailable: boolean): boolean {
   try {
-    localStorage.setItem(AVAILABILITY_KEY, JSON.stringify(isAvailable));
+    localStorage.setItem(AVAILABILITY_KEY, safeStringify(isAvailable));
 
     // Also sync with user profile record
     const rawProfile = localStorage.getItem(USER_PROFILE_KEY);
     if (rawProfile) {
       const p = JSON.parse(rawProfile);
       p.isAvailableForHire = isAvailable;
-      localStorage.setItem(USER_PROFILE_KEY, JSON.stringify(p));
+      localStorage.setItem(USER_PROFILE_KEY, safeStringify(p));
     }
 
     recordActivity({
@@ -123,18 +124,14 @@ export function setUserAvailability(isAvailable: boolean): boolean {
   return isAvailable;
 }
 
-// --- Retrieve ONLY Real Registered & Approved Users for Seekers Feature ---
+// --- Retrieve Real Registered & Approved Users for Seekers Feature ---
 export function getApprovedSeekers(): SubmissionRecord[] {
   const storeSubmissions = getStoredSubmissions();
   const combinedMap = new Map<string, SubmissionRecord>();
 
-  // 1. Only real approved submissions from store
+  // 1. All approved submissions from store
   storeSubmissions.forEach((sub) => {
-    if (
-      sub.status === 'approved' &&
-      !sub.id?.startsWith('approved-seeker-') &&
-      !sub.id?.startsWith('sub-00')
-    ) {
+    if (sub.status === 'approved') {
       combinedMap.set(sub.id, {
         ...sub,
         hourlyRate: sub.hourlyRate || '$50/hr',

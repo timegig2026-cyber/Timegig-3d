@@ -1,12 +1,10 @@
 @import "tailwindcss";
 @import "leaflet/dist/leaflet.css";
 
-/* Leaflet map container styling guarantees */
-.leaflet-container {
+/* Map container styling guarantees */
+.maplibregl-map {
   width: 100% !important;
   height: 100% !important;
-  background-color: #e2e8f0 !important;
-  outline: none;
 }
 
 .custom-user-map-pin {
